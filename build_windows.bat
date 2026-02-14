@@ -17,9 +17,11 @@ if errorlevel 1 (
     echo [ERROR] PyInstaller not found!
     echo.
     echo Installing PyInstaller...
-    pip install pyinstaller
+    pip install --user pyinstaller
     if errorlevel 1 (
         echo [ERROR] Failed to install PyInstaller
+        echo Trying with administrator privileges...
+        powershell -Command "Start-Process pip -ArgumentList 'install pyinstaller' -Verb RunAs"
         pause
         exit /b 1
     )
@@ -31,7 +33,7 @@ if errorlevel 1 (
     echo [ERROR] mysql-connector-python not found!
     echo.
     echo Installing mysql-connector-python...
-    pip install mysql-connector-python
+    pip install --user mysql-connector-python
     if errorlevel 1 (
         echo [ERROR] Failed to install mysql-connector-python
         pause
@@ -46,7 +48,7 @@ if exist dist rmdir /s /q dist
 if exist patient_unvoid_tool.spec del /q patient_unvoid_tool.spec
 
 echo [2/4] Building executable...
-pyinstaller --onefile ^
+python -m PyInstaller --onefile ^
     --windowed ^
     --name="PatientUnvoidTool" ^
     --icon=NONE ^
@@ -56,6 +58,9 @@ pyinstaller --onefile ^
 if errorlevel 1 (
     echo.
     echo [ERROR] Build failed!
+    echo.
+    echo If you see permission errors, try running this script as Administrator:
+    echo Right-click build_windows.bat and select "Run as administrator"
     pause
     exit /b 1
 )

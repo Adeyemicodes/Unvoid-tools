@@ -16,7 +16,7 @@ if ! python3 -c "import PyInstaller" 2>/dev/null; then
     echo "[ERROR] PyInstaller not found!"
     echo ""
     echo "Installing PyInstaller..."
-    pip3 install pyinstaller
+    pip3 install --user pyinstaller
     if [ $? -ne 0 ]; then
         echo "[ERROR] Failed to install PyInstaller"
         exit 1
@@ -28,7 +28,7 @@ if ! python3 -c "import mysql.connector" 2>/dev/null; then
     echo "[ERROR] mysql-connector-python not found!"
     echo ""
     echo "Installing mysql-connector-python..."
-    pip3 install mysql-connector-python
+    pip3 install --user mysql-connector-python
     if [ $? -ne 0 ]; then
         echo "[ERROR] Failed to install mysql-connector-python"
         exit 1
@@ -40,7 +40,7 @@ echo "[1/5] Cleaning previous build..."
 rm -rf build dist patient_unvoid_tool.spec
 
 echo "[2/5] Building executable..."
-pyinstaller --onefile \
+python3 -m PyInstaller --onefile \
     --windowed \
     --name="PatientUnvoidTool" \
     --add-data="unvoid_config.ini:." \
