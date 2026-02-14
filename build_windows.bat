@@ -52,6 +52,10 @@ python -m PyInstaller --onefile ^
     --windowed ^
     --name="PatientUnvoidTool" ^
     --icon=NONE ^
+    --hidden-import=mysql.connector ^
+    --hidden-import=mysql.connector.plugins ^
+    --hidden-import=mysql.connector.plugins.mysql_native_password ^
+    --hidden-import=mysql.connector.plugins.caching_sha2_password ^
     --add-data="unvoid_config.ini;." ^
     patient_unvoid_tool.py
 
