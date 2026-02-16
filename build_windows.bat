@@ -27,15 +27,15 @@ if errorlevel 1 (
     )
 )
 
-REM Check if mysql-connector-python is installed
-python -c "import mysql.connector" 2>nul
+REM Check if pymysql is installed
+python -c "import pymysql" 2>nul
 if errorlevel 1 (
-    echo [ERROR] mysql-connector-python not found!
+    echo [ERROR] pymysql not found!
     echo.
-    echo Installing mysql-connector-python...
-    pip install --user mysql-connector-python
+    echo Installing pymysql...
+    pip install --user pymysql
     if errorlevel 1 (
-        echo [ERROR] Failed to install mysql-connector-python
+        echo [ERROR] Failed to install pymysql
         pause
         exit /b 1
     )
@@ -52,10 +52,6 @@ python -m PyInstaller --onefile ^
     --windowed ^
     --name="PatientUnvoidTool" ^
     --icon=NONE ^
-    --hidden-import=mysql.connector ^
-    --hidden-import=mysql.connector.plugins ^
-    --hidden-import=mysql.connector.plugins.mysql_native_password ^
-    --hidden-import=mysql.connector.plugins.caching_sha2_password ^
     --add-data="unvoid_config.ini;." ^
     patient_unvoid_tool.py
 

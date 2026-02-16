@@ -18,8 +18,8 @@ Python: 3.6+
 
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
-import mysql.connector
-from mysql.connector import Error
+import pymysql as mysql_connector
+from pymysql import Error
 import configparser
 from datetime import datetime
 from pathlib import Path
@@ -179,7 +179,7 @@ class UnvoidPatientApp:
         """Test database connection"""
 
         try:
-            conn = mysql.connector.connect(
+            conn = mysql_connector.connect(
                 host=self.config['database']['host'],
                 user=self.config['database']['user'],
                 password=self.config['database']['password'],
@@ -187,7 +187,7 @@ class UnvoidPatientApp:
                 port=int(self.config['database'].get('port', 3306))
             )
 
-            if conn.is_connected():
+            if conn.open:
                 conn.close()
                 # Connection successful, show main screen
                 self.show_main_screen()
@@ -364,10 +364,10 @@ class UnvoidPatientApp:
     def get_connection(self):
         """Get database connection"""
         try:
-            if self.connection and self.connection.is_connected():
+            if self.connection and self.connection.open:
                 return self.connection
 
-            self.connection = mysql.connector.connect(
+            self.connection = mysql_connector.connect(
                 host=self.config['database']['host'],
                 user=self.config['database']['user'],
                 password=self.config['database']['password'],
@@ -397,7 +397,7 @@ class UnvoidPatientApp:
 
         cursor = None
         try:
-            cursor = conn.cursor(dictionary=True)
+            cursor = conn.cursor(mysql_connector.cursors.DictCursor)
 
             # Find patient by identifier (voided records only)
             query = """
@@ -424,7 +424,7 @@ class UnvoidPatientApp:
             if not result:
                 # Close current cursor and create new one for second query
                 cursor.close()
-                cursor = conn.cursor(dictionary=True)
+                cursor = conn.cursor(mysql_connector.cursors.DictCursor)
 
                 # Check if exists but not voided
                 cursor.execute(

@@ -23,14 +23,14 @@ if ! python3 -c "import PyInstaller" 2>/dev/null; then
     fi
 fi
 
-# Check if mysql-connector-python is installed
-if ! python3 -c "import mysql.connector" 2>/dev/null; then
-    echo "[ERROR] mysql-connector-python not found!"
+# Check if pymysql is installed
+if ! python3 -c "import pymysql" 2>/dev/null; then
+    echo "[ERROR] pymysql not found!"
     echo ""
-    echo "Installing mysql-connector-python..."
-    pip3 install --user mysql-connector-python
+    echo "Installing pymysql..."
+    pip3 install --user pymysql
     if [ $? -ne 0 ]; then
-        echo "[ERROR] Failed to install mysql-connector-python"
+        echo "[ERROR] Failed to install pymysql"
         exit 1
     fi
 fi
@@ -43,10 +43,6 @@ echo "[2/5] Building executable..."
 python3 -m PyInstaller --onefile \
     --windowed \
     --name="PatientUnvoidTool" \
-    --hidden-import=mysql.connector \
-    --hidden-import=mysql.connector.plugins \
-    --hidden-import=mysql.connector.plugins.mysql_native_password \
-    --hidden-import=mysql.connector.plugins.caching_sha2_password \
     --add-data="unvoid_config.ini:." \
     patient_unvoid_tool.py
 
