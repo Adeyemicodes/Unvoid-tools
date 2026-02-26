@@ -409,11 +409,12 @@ class UnvoidPatientApp:
 
             # Find patient by identifier (voided records only)
             # CRITICAL: Get void_reason and date_voided from patient table for safety check
+            # NOTE: person_name may be voided too, so we don't filter by voided = 0
             query = """
                 SELECT 
                     pi.patient_id,
                     pi.identifier,
-                    CONCAT(pn.given_name, ' ', pn.family_name) AS patient_name,
+                    CONCAT(pn.given_name, ' ', IFNULL(pn.family_name, '')) AS patient_name,
                     p.gender,
                     p.birthdate,
                     pi.voided AS identifier_voided,
@@ -424,8 +425,9 @@ class UnvoidPatientApp:
                 FROM patient_identifier pi
                 JOIN person p ON pi.patient_id = p.person_id
                 JOIN patient pat ON pi.patient_id = pat.patient_id
-                LEFT JOIN person_name pn ON p.person_id = pn.person_id AND pn.voided = 0
+                LEFT JOIN person_name pn ON p.person_id = pn.person_id
                 WHERE pi.identifier = %s AND pi.voided = 1
+                ORDER BY pn.preferred DESC, pn.date_created DESC
                 LIMIT 1
             """
 
