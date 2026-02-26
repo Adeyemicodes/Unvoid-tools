@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
 """
-Patient Unvoid Tool - CCFN OpenMRS
-===================================
-Secure tool for unvoiding patient records in OpenMRS database
+Patient Unvoid Tool v2.0 - CCFN OpenMRS
+========================================
+CRITICAL SAFETY UPGRADE: Timestamp-Based Unvoiding
+
+NEW in v2.0:
+- Only unvoids records from specific bulk void operation (±120 seconds)
+- Requires void_reason = 'Bulk void via ART/DATIM mapping'
+- Blocks unvoid if wrong/missing void_reason
+- Shows timestamp and time range to user
+- Enhanced audit trail with timestamp info
 
 Features:
 - Password-protected (Administrator only)
 - Patient lookup by ART Identifier
-- Confirmation step before unvoiding
+- Timestamp-based selective unvoiding (SAFE!)
+- Double confirmation with time range display
 - Comprehensive audit trail
 - Real-time feedback
 
 Author: Adeyemi
-Date: January 2026
+Date: February 2026
 Python: 3.6+
 """
 
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
 import pymysql as mysql_connector
-from pymysql import Error
+from pymysql.err import Error
 import configparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import traceback
 
@@ -31,7 +39,7 @@ class UnvoidPatientApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("Patient Unvoid Tool - CCFN")
+        self.root.title("Patient Unvoid Tool v2.0 - CCFN")
         self.root.geometry("800x700")
         self.root.resizable(False, False)
 
@@ -63,7 +71,7 @@ class UnvoidPatientApp:
         # Header
         tk.Label(
             login_frame,
-            text="🔒 ADMINISTRATOR ACCESS REQUIRED",
+            text="ADMINISTRATOR ACCESS REQUIRED",
             font=("Arial", 16, "bold"),
             bg="#f0f0f0",
             fg="#d32f2f"
@@ -124,7 +132,7 @@ class UnvoidPatientApp:
         # Warning
         tk.Label(
             login_frame,
-            text="⚠ WARNING: This tool unvoids patient records.\nUse with extreme caution.",
+            text="WARNING: This tool unvoids patient records.\nUse with extreme caution.",
             font=("Arial", 9),
             bg="#f0f0f0",
             fg="#d32f2f",
@@ -309,7 +317,7 @@ class UnvoidPatientApp:
 
         tk.Label(
             action_frame,
-            text="⚠ WARNING: This action will unvoid ALL records for this patient.",
+            text="WARNING: This action will unvoid ALL records for this patient.",
             font=("Arial", 9),
             fg="#d32f2f"
         ).pack(pady=(0, 10))
@@ -400,6 +408,7 @@ class UnvoidPatientApp:
             cursor = conn.cursor(mysql_connector.cursors.DictCursor)
 
             # Find patient by identifier (voided records only)
+            # CRITICAL: Get void_reason and date_voided from patient table for safety check
             query = """
                 SELECT 
                     pi.patient_id,
@@ -407,11 +416,14 @@ class UnvoidPatientApp:
                     CONCAT(pn.given_name, ' ', pn.family_name) AS patient_name,
                     p.gender,
                     p.birthdate,
-                    pi.voided,
-                    pi.date_voided,
-                    pi.void_reason
+                    pi.voided AS identifier_voided,
+                    pi.date_voided AS identifier_date_voided,
+                    pat.voided AS patient_voided,
+                    pat.date_voided AS patient_date_voided,
+                    pat.void_reason AS patient_void_reason
                 FROM patient_identifier pi
                 JOIN person p ON pi.patient_id = p.person_id
+                JOIN patient pat ON pi.patient_id = pat.patient_id
                 LEFT JOIN person_name pn ON p.person_id = pn.person_id AND pn.voided = 0
                 WHERE pi.identifier = %s AND pi.voided = 1
                 LIMIT 1
@@ -450,8 +462,53 @@ class UnvoidPatientApp:
                     )
 
                 self.current_patient = None
-                self.unvoid_button.config(state="disabled", bg="#cccccc")
+                self.unvoid_button.config(state="disabled", bg="#cccccc", fg="#666666")
                 return
+
+            # CRITICAL SAFETY CHECK: Verify void_reason
+            void_reason = result.get('patient_void_reason', '')
+            required_reason = 'Bulk void via ART/DATIM mapping'
+
+            if void_reason != required_reason:
+                self.log(f"ERROR: Invalid void reason: '{void_reason}'")
+                self.log(f"       Required: '{required_reason}'")
+                self.log(f"       Operation BLOCKED for safety")
+                messagebox.showerror(
+                    "Cannot Unvoid - Wrong Void Reason",
+                    f"SAFETY BLOCK: This tool can ONLY unvoid patients with:\n\n"
+                    f"Void Reason: '{required_reason}'\n\n"
+                    f"This patient has:\n"
+                    f"Void Reason: '{void_reason or 'NULL'}'\n\n"
+                    f"Operation BLOCKED for safety.\n\n"
+                    f"If you need to unvoid this patient, please contact\n"
+                    f"your database administrator."
+                )
+                self.current_patient = None
+                self.unvoid_button.config(state="disabled", bg="#cccccc", fg="#666666")
+                return
+
+            # Verify we have a date_voided timestamp
+            if not result.get('patient_date_voided'):
+                self.log(f"ERROR: No date_voided timestamp found")
+                self.log(f"       Operation BLOCKED for safety")
+                messagebox.showerror(
+                    "Cannot Unvoid - Missing Timestamp",
+                    "Patient record does not have a date_voided timestamp.\n\n"
+                    "Operation BLOCKED for safety.\n\n"
+                    "Contact your database administrator."
+                )
+                self.current_patient = None
+                self.unvoid_button.config(state="disabled", bg="#cccccc", fg="#666666")
+                return
+
+            # Calculate time range (±120 seconds)
+            void_timestamp = result['patient_date_voided']
+            time_start = void_timestamp - timedelta(seconds=120)
+            time_end = void_timestamp + timedelta(seconds=120)
+
+            # Store calculated values
+            result['time_start'] = time_start
+            result['time_end'] = time_end
 
             # Store patient data
             self.current_patient = result
@@ -460,9 +517,12 @@ class UnvoidPatientApp:
             self.display_patient_details(result)
 
             # Enable unvoid button with proper color
-            self.unvoid_button.config(state="normal", bg="#f44336")
+            self.unvoid_button.config(state="normal", bg="#f44336", fg="white")
 
             self.log(f"SUCCESS: Found patient - {result['patient_name']} (ID: {result['patient_id']})")
+            self.log(f"         Void reason: '{void_reason}' - VALID")
+            self.log(f"         Void timestamp: {void_timestamp}")
+            self.log(f"         Time range: {time_start} to {time_end} (±120 sec)")
 
         except Error as e:
             self.log(f"ERROR: Database query failed - {str(e)}")
@@ -473,10 +533,14 @@ class UnvoidPatientApp:
                 cursor.close()
 
     def display_patient_details(self, patient):
-        """Display patient information for verification"""
+        """Display patient information with timestamp and time range"""
 
         self.details_text.config(state="normal")
         self.details_text.delete(1.0, tk.END)
+
+        void_timestamp = patient['patient_date_voided']
+        time_start = patient['time_start']
+        time_end = patient['time_end']
 
         details = f"""
 Identifier:    {patient['identifier']}
@@ -484,29 +548,49 @@ Patient ID:    {patient['patient_id']}
 Name:          {patient['patient_name']}
 Gender:        {patient['gender']}
 Birthdate:     {patient['birthdate']}
+
+VOID INFORMATION:
 Status:        VOIDED
-Voided Date:   {patient['date_voided']}
-Void Reason:   {patient['void_reason'] or 'Not specified'}
+Void Reason:   {patient['patient_void_reason']}
+Void Time:     {void_timestamp}
+
+TIMESTAMP-BASED UNVOID RANGE:
+From:          {time_start}  (-2 min)
+To:            {time_end}  (+2 min)
+Window:        4 minutes total
+
+SAFETY NOTE:
+Only records voided within this 4-minute time window 
+will be unvoided. Records voided at other times will 
+remain voided for safety.
 """
 
         self.details_text.insert(1.0, details.strip())
         self.details_text.config(state="disabled")
 
     def confirm_unvoid(self):
-        """Confirm before unvoiding"""
+        """Confirm before unvoiding with timestamp details"""
 
         if not self.current_patient:
             return
 
         patient = self.current_patient
+        void_timestamp = patient['patient_date_voided']
+        time_start = patient['time_start']
+        time_end = patient['time_end']
 
         response = messagebox.askyesno(
             "Confirm Unvoid Action",
             f"Are you sure you want to UNVOID this patient?\n\n"
-            f"Identifier: {patient['identifier']}\n"
-            f"Name: {patient['patient_name']}\n"
+            f"Patient: {patient['patient_name']} ({patient['identifier']})\n"
             f"Patient ID: {patient['patient_id']}\n\n"
-            f"This will restore ALL voided records for this patient.\n\n"
+            f"Bulk Void Timestamp: {void_timestamp}\n\n"
+            f"Time Range to Unvoid:\n"
+            f"  From: {time_start}  (-2 minutes)\n"
+            f"  To:   {time_end}  (+2 minutes)\n\n"
+            f"IMPORTANT: This will ONLY unvoid records voided within\n"
+            f"this 4-minute window. Records voided at other times will\n"
+            f"remain voided for safety.\n\n"
             f"Do you want to proceed?",
             icon="warning"
         )
@@ -526,7 +610,7 @@ Void Reason:   {patient['void_reason'] or 'Not specified'}
                 self.unvoid_patient()
 
     def unvoid_patient(self):
-        """Execute unvoid operations"""
+        """Execute timestamp-based unvoid operations (SAFE)"""
 
         if not self.current_patient:
             return
@@ -536,10 +620,17 @@ Void Reason:   {patient['void_reason'] or 'Not specified'}
         identifier = patient['identifier']
         admin_name = self.config['settings'].get('admin_name', 'Administrator')
 
+        # Get timestamp range
+        void_timestamp = patient['patient_date_voided']
+        time_start = patient['time_start']
+        time_end = patient['time_end']
+
         self.log("-" * 70)
-        self.log(f"STARTING UNVOID OPERATION")
+        self.log(f"STARTING TIMESTAMP-BASED UNVOID OPERATION")
         self.log(f"Patient: {patient['patient_name']} ({identifier})")
         self.log(f"Patient ID: {patient_id}")
+        self.log(f"Void Timestamp: {void_timestamp}")
+        self.log(f"Time Range: {time_start} to {time_end} (±120 seconds)")
         self.log("-" * 70)
 
         conn = self.get_connection()
@@ -552,54 +643,210 @@ Void Reason:   {patient['void_reason'] or 'Not specified'}
             # Ensure audit table exists
             self.create_audit_table(cursor)
 
-            # Tables to unvoid
-            tables = [
-                'patient',
-                'patient_identifier',
-                'patient_program',
-                'person',
-                'person_name',
-                'person_address',
-                'person_attribute',
-                'visit',
-                'encounter',
-                'obs'
-            ]
-
             total_updated = 0
 
-            # Unvoid each table
-            for table in tables:
-                self.log(f"Unvoiding {table}...")
+            # IMPORTANT: Only the patient table has void_reason set during bulk void.
+            # Other tables only have date_voided timestamp.
+            # Strategy:
+            #   - Patient table: Check BOTH void_reason AND timestamp
+            #   - All other tables: Check timestamp ONLY
 
-                # Determine ID column
-                id_col = 'patient_id' if table in ['patient', 'patient_identifier', 'patient_program', 'visit',
-                                                   'encounter'] else 'person_id'
+            # 1. Unvoid patient table (with void_reason check for safety)
+            self.log(f"Unvoiding patient...")
+            query = """
+                UPDATE patient
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE patient_id = %s 
+                  AND voided = 1
+                  AND void_reason = 'Bulk void via ART/DATIM mapping'
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in patient")
+            else:
+                self.log(f"  [WARNING] No records matched in patient table")
 
-                query = f"""
-                    UPDATE {table}
-                    SET voided = 0, 
-                        voided_by = NULL, 
-                        date_voided = NULL, 
-                        void_reason = NULL
-                    WHERE {id_col} = %s AND voided = 1
-                """
+            # 2. Unvoid patient_identifier (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding patient_identifier...")
+            query = """
+                UPDATE patient_identifier
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE patient_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in patient_identifier")
 
-                cursor.execute(query, (patient_id,))
-                rows = cursor.rowcount
-                total_updated += rows
+            # 3. Unvoid patient_program (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding patient_program...")
+            query = """
+                UPDATE patient_program
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE patient_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in patient_program")
 
-                if rows > 0:
-                    self.log(f"  [OK] {rows} record(s) unvoided in {table}")
-                else:
-                    self.log(f"  [INFO] No voided records in {table}")
+            # 4. Unvoid person (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding person...")
+            query = """
+                UPDATE person
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE person_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in person")
 
-            # Log to audit table
+            # 5. Unvoid person_name (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding person_name...")
+            query = """
+                UPDATE person_name
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE person_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in person_name")
+
+            # 6. Unvoid person_address (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding person_address...")
+            query = """
+                UPDATE person_address
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE person_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in person_address")
+
+            # 7. Unvoid person_attribute (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding person_attribute...")
+            query = """
+                UPDATE person_attribute
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE person_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in person_attribute")
+
+            # 8. Unvoid visit (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding visit...")
+            query = """
+                UPDATE visit
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE patient_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in visit")
+
+            # 9. Unvoid encounter (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding encounter...")
+            query = """
+                UPDATE encounter
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE patient_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in encounter")
+
+            # 10. Unvoid obs (timestamp-based ONLY - no void_reason!)
+            self.log(f"Unvoiding obs...")
+            query = """
+                UPDATE obs
+                SET voided = 0, 
+                    voided_by = NULL, 
+                    date_voided = NULL, 
+                    void_reason = NULL
+                WHERE person_id = %s 
+                  AND voided = 1
+                  AND date_voided BETWEEN %s AND %s
+            """
+            cursor.execute(query, (patient_id, time_start, time_end))
+            rows = cursor.rowcount
+            total_updated += rows
+            if rows > 0:
+                self.log(f"  [OK] {rows} record(s) unvoided in obs")
+
+            # Log to audit table with timestamp info
             audit_query = """
                 INSERT INTO nmrs_unvoid_audit
                 (identifier, patient_id, patient_name, executed_by, action_status, remarks)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """
+
+            remarks = (
+                f'Timestamp-based unvoid: {void_timestamp} (±120sec). '
+                f'Range: {time_start} to {time_end}. '
+                f'Total: {total_updated} records. '
+                f'void_reason: Bulk void via ART/DATIM mapping'
+            )
 
             cursor.execute(audit_query, (
                 identifier,
@@ -607,7 +854,7 @@ Void Reason:   {patient['void_reason'] or 'Not specified'}
                 patient['patient_name'],
                 admin_name,
                 'SUCCESS',
-                f'Patient and related records unvoided. Total: {total_updated} records'
+                remarks
             ))
 
             # Commit transaction
@@ -615,16 +862,23 @@ Void Reason:   {patient['void_reason'] or 'Not specified'}
 
             self.log("-" * 70)
             self.log(f"SUCCESS: Unvoided {total_updated} total records")
+            self.log(f"         within timestamp range (±120 seconds)")
+            self.log(f"         Records outside this range remain voided (SAFE)")
+            self.log("-" * 70)
             self.log(f"Audit entry created in nmrs_unvoid_audit")
             self.log("-" * 70)
 
             # Show success message
             messagebox.showinfo(
                 "Unvoid Complete",
-                f"✅ Patient records successfully unvoided!\n\n"
+                f"SUCCESS: Patient records successfully unvoided!\n\n"
                 f"Patient: {patient['patient_name']}\n"
                 f"Identifier: {identifier}\n"
                 f"Total Records Unvoided: {total_updated}\n\n"
+                f"Timestamp Range: {time_start} to {time_end}\n"
+                f"(±120 seconds from bulk void)\n\n"
+                f"SAFETY: Only records voided within this time window\n"
+                f"were unvoided. Other records remain voided.\n\n"
                 f"Audit entry has been logged."
             )
 
